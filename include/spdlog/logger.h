@@ -39,9 +39,9 @@
 #    define SPDLOG_LOGGER_CATCH(location)                                                                                                  \
         catch (const std::exception &ex)                                                                                                   \
         {                                                                                                                                  \
-            if(location.filename)                                                                                                          \
+            if (location.filename)                                                                                                         \
             {                                                                                                                              \
-                err_handler_(fmt::format("{} [{}({})]", ex.what(), location.filename, location.line));                                     \
+                err_handler_(fmt_lib::format(SPDLOG_FMT_STRING("{} [{}({})]"), ex.what(), location.filename, location.line));              \
             }                                                                                                                              \
             else                                                                                                                           \
             {                                                                                                                              \
@@ -93,13 +93,13 @@ public:
     void swap(spdlog::logger &other) SPDLOG_NOEXCEPT;
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, format_string_t<Args...> fmt, Args &&... args)
     {
         return log_(loc, lvl, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T log(level::level_enum lvl, fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T log(level::level_enum lvl, format_string_t<Args...> fmt, Args &&... args)
     {
         return log(source_loc{}, lvl, fmt, std::forward<Args>(args)...);
     }
@@ -110,14 +110,7 @@ public:
         return log(source_loc{}, lvl, msg);
     }
 
-    // T can be statically converted to string_view
-    template<class T, typename std::enable_if<std::is_convertible<const T &, spdlog::string_view_t>::value, int>::type = 0>
-    SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, const T &msg)
-    {
-        return log(loc, lvl, string_view_t{msg});
-    }
-
-    // T cannot be statically converted to format string (including string_view)
+    // T cannot be statically converted to format string (including string_view/wstring_view)
     template<class T, typename std::enable_if<!is_convertible_to_any_format_string<const T &>::value, int>::type = 0>
     SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, const T &msg)
     {
@@ -156,86 +149,121 @@ public:
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T trace(fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T trace(format_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::trace, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T debug(fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T debug(format_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::debug, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T info(fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T info(format_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::info, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T warn(fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T warn(format_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::warn, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T error(fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T error(format_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::err, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T critical(fmt::format_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T critical(format_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::critical, fmt, std::forward<Args>(args)...);
     }
 
 #ifdef SPDLOG_WCHAR_TO_UTF8_SUPPORT
     template<typename... Args>
-    SPDLOG_EXECUTOR_T log(level::level_enum lvl, fmt::wformat_string<Args...> fmt, Args &&...args)
-    {
-        return log(source_loc{}, lvl, fmt, std::forward<Args>(args)...);
-    }
-
-    template<typename... Args>
-    SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log_(loc, lvl, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T trace(fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T log(level::level_enum lvl, wformat_string_t<Args...> fmt, Args &&... args)
+    {
+        return log(source_loc{}, lvl, fmt, std::forward<Args>(args)...);
+    }
+
+    SPDLOG_EXECUTOR_T log(log_clock::time_point log_time, source_loc loc, level::level_enum lvl, wstring_view_t msg)
+    {
+        bool log_enabled = should_log(lvl);
+        bool traceback_enabled = tracer_.enabled();
+        if (!log_enabled && !traceback_enabled)
+        {
+            return;
+        }
+
+        memory_buf_t buf;
+        details::os::wstr_to_utf8buf(wstring_view_t(msg.data(), msg.size()), buf);
+        details::log_msg log_msg(log_time, loc, name_, lvl, string_view_t(buf.data(), buf.size()));
+        return log_it_(log_msg, log_enabled, traceback_enabled);
+    }
+
+    SPDLOG_EXECUTOR_T log(source_loc loc, level::level_enum lvl, wstring_view_t msg)
+    {
+        bool log_enabled = should_log(lvl);
+        bool traceback_enabled = tracer_.enabled();
+        if (!log_enabled && !traceback_enabled)
+        {
+            return;
+        }
+
+        memory_buf_t buf;
+        details::os::wstr_to_utf8buf(wstring_view_t(msg.data(), msg.size()), buf);
+        details::log_msg log_msg(loc, name_, lvl, string_view_t(buf.data(), buf.size()));
+        return log_it_(log_msg, log_enabled, traceback_enabled);
+    }
+
+    SPDLOG_EXECUTOR_T log(level::level_enum lvl, wstring_view_t msg)
+    {
+        return log(source_loc{}, lvl, msg);
+    }
+
+    template<typename... Args>
+    SPDLOG_EXECUTOR_T trace(wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::trace, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T debug(fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T debug(wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::debug, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T info(fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T info(wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::info, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T warn(fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T warn(wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::warn, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T error(fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T error(wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::err, fmt, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    SPDLOG_EXECUTOR_T critical(fmt::wformat_string<Args...> fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T critical(wformat_string_t<Args...> fmt, Args &&... args)
     {
         return log(level::critical, fmt, std::forward<Args>(args)...);
     }
@@ -299,6 +327,10 @@ public:
     // each sink will get a separate instance of the formatter object.
     void set_formatter(std::unique_ptr<formatter> f);
 
+    // set formatting for the sinks in this logger.
+    // equivalent to
+    //     set_formatter(make_unique<pattern_formatter>(pattern, time_type))
+    // Note: each sink will get a new instance of a formatter object, replacing the old one.
     void set_pattern(std::string pattern, pattern_time_type time_type = pattern_time_type::local);
 
 #ifdef SPDLOG_JSON_LOGGER
@@ -343,7 +375,7 @@ protected:
 
     // common implementation for after templated public api has been resolved
     template<typename... Args>
-    SPDLOG_EXECUTOR_T log_(source_loc loc, level::level_enum lvl, string_view_t fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T log_(source_loc loc, level::level_enum lvl, string_view_t fmt, Args &&... args)
     {
         bool log_enabled = should_log(lvl);
         bool traceback_enabled = tracer_.enabled();
@@ -354,7 +386,12 @@ protected:
         SPDLOG_TRY
         {
             memory_buf_t buf;
-            fmt::detail::vformat_to(buf, fmt, fmt::make_format_args(args...));
+#ifdef SPDLOG_USE_STD_FORMAT
+            fmt_lib::vformat_to(std::back_inserter(buf), fmt, fmt_lib::make_format_args(std::forward<Args>(args)...));
+#else
+            fmt::vformat_to(fmt::appender(buf), fmt, fmt::make_format_args(std::forward<Args>(args)...));
+#endif
+
             details::log_msg log_msg(loc, name_, lvl, string_view_t(buf.data(), buf.size()));
             return log_it_(log_msg, log_enabled, traceback_enabled);
         }
@@ -364,7 +401,7 @@ protected:
 
 #ifdef SPDLOG_WCHAR_TO_UTF8_SUPPORT
     template<typename... Args>
-    SPDLOG_EXECUTOR_T log_(source_loc loc, level::level_enum lvl, wstring_view_t fmt, Args &&...args)
+    SPDLOG_EXECUTOR_T log_(source_loc loc, level::level_enum lvl, wstring_view_t fmt, Args &&... args)
     {
         bool log_enabled = should_log(lvl);
         bool traceback_enabled = tracer_.enabled();
@@ -375,8 +412,14 @@ protected:
         SPDLOG_TRY
         {
             // format to wmemory_buffer and convert to utf8
-            fmt::wmemory_buffer wbuf;
-            fmt::detail::vformat_to(wbuf, fmt, fmt::make_format_args<fmt::wformat_context>(args...));
+            wmemory_buf_t wbuf;
+#    ifdef SPDLOG_USE_STD_FORMAT
+            fmt_lib::vformat_to(
+                std::back_inserter(wbuf), fmt, fmt_lib::make_format_args<fmt_lib::wformat_context>(std::forward<Args>(args)...));
+#    else
+            fmt::vformat_to(std::back_inserter(wbuf), fmt, fmt::make_format_args<fmt::wformat_context>(std::forward<Args>(args)...));
+#    endif
+
             memory_buf_t buf;
             details::os::wstr_to_utf8buf(wstring_view_t(wbuf.data(), wbuf.size()), buf);
             details::log_msg log_msg(loc, name_, lvl, string_view_t(buf.data(), buf.size()));
