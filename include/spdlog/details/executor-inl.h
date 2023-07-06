@@ -47,15 +47,19 @@ SPDLOG_INLINE executor::~executor() noexcept(false)
     if (ctx_)
     {
         ctx_->msg.params = &ctx_->msg.params_buffer;
+#ifdef SPDLOG_NO_EXCEPTIONS
         try
         {
+#endif
             ctx_->lgr->executor_callback(ctx_->msg, ctx_->log_enabled, ctx_->traceback_enabled);
+#ifdef SPDLOG_NO_EXCEPTIONS
         }
         catch (...)
         {
             ctx_->~context();
             throw;
         }
+#endif
         ctx_->~context();
     }
 }
